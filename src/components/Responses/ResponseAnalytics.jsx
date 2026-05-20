@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { db } from "../../utils/firebase";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
-// Modern Enterprise Palette
 const CHART_COLORS = ["#4F46E5", "#0EA5E9", "#14B8A6", "#8B5CF6", "#F43F5E"];
 
 const ResponseAnalytics = () => {
@@ -24,8 +23,8 @@ const ResponseAnalytics = () => {
     })();
   }, [formId]);
 
-  if (loading) return <div className="p-10 text-center animate-pulse">Compiling metrics...</div>;
-  if (!responses.length) return <div className="p-10 text-center text-gray-500">Insufficient data: No responses logged yet.</div>;
+  if (loading) return <div className="p-10 text-center text-gray-500 animate-pulse font-medium mt-20">Compiling metrics...</div>;
+  if (!responses.length) return <div className="p-10 text-center text-gray-500 mt-20">Insufficient data: No responses logged yet.</div>;
 
   const grouped = {};
   form.questions.forEach((q) => {
@@ -42,7 +41,7 @@ const ResponseAnalytics = () => {
     return Object.entries(map).map(([label, count], index) => ({ 
       label, 
       count,
-      fill: CHART_COLORS[index % CHART_COLORS.length] // Assign color dynamically
+      fill: CHART_COLORS[index % CHART_COLORS.length]
     }));
   };
 
@@ -52,12 +51,15 @@ const ResponseAnalytics = () => {
 
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto bg-slate-50 min-h-screen">
+      
       <div className="mb-8">
+        <Link to={`/responses/${formId}`} className="text-indigo-600 hover:text-indigo-800 text-sm font-semibold mb-4 inline-block flex items-center gap-1 transition-colors">
+          <span>&larr;</span> Back to Data Log
+        </Link>
         <h1 className="text-4xl font-extrabold text-gray-900 mb-2">{form.title}</h1>
-        <p className="text-lg text-gray-500">Analytics & Aggregated Metrics</p>
+        <p className="text-lg text-gray-500">Aggregated Form Analytics</p>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         <div className="bg-white border-l-4 border-indigo-600 shadow-sm p-6 rounded-xl">
           <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Total Datapoints</p>
@@ -73,11 +75,10 @@ const ResponseAnalytics = () => {
         </div>
       </div>
 
-      {/* Visualizations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {form.questions.map((q, idx) => {
           const answers = grouped[q.id];
-          const hasChart = q.type === "radio" || q.type === "checkbox"; // Note: changed from "mcq" to match your builder logic
+          const hasChart = q.type === "radio" || q.type === "checkbox";
 
           return (
             <div key={q.id} className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 ${!hasChart ? 'col-span-1 lg:col-span-2' : ''}`}>
@@ -85,7 +86,6 @@ const ResponseAnalytics = () => {
                 <span className="text-indigo-400 mr-2">Q{idx + 1}.</span> {q.question}
               </h2>
 
-              {/* TEXT ANSWERS */}
               {!hasChart && (
                 <div className="max-h-64 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                   {answers.map((a, i) => (
@@ -96,7 +96,6 @@ const ResponseAnalytics = () => {
                 </div>
               )}
 
-              {/* CHARTS */}
               {hasChart && (
                 <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
