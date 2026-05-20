@@ -2,19 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { db } from "../../utils/firebase";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
-const COLORS = ["#6A5AE0", "#FF8A65", "#4DB6AC", "#9575CD", "#F06292"];
+// Modern Enterprise Palette
+const CHART_COLORS = ["#4F46E5", "#0EA5E9", "#14B8A6", "#8B5CF6", "#F43F5E"];
 
 const ResponseAnalytics = () => {
   const { formId } = useParams();
@@ -28,110 +19,96 @@ const ResponseAnalytics = () => {
       if (formSnap.exists()) setForm(formSnap.data());
 
       const respSnap = await getDocs(collection(db, "forms", formId, "responses"));
-      const respData = respSnap.docs.map((d) => d.data());
-      setResponses(respData);
-
+      setResponses(respSnap.docs.map((d) => d.data()));
       setLoading(false);
     })();
   }, [formId]);
 
-  if (loading) return <p className="p-10">Loading analytics...</p>;
-  if (!responses.length) return <p className="p-10">No responses to analyze.</p>;
+  if (loading) return <div className="p-10 text-center animate-pulse">Compiling metrics...</div>;
+  if (!responses.length) return <div className="p-10 text-center text-gray-500">Insufficient data: No responses logged yet.</div>;
 
-  // ---- GROUP ANSWERS BY QUESTION ----
   const grouped = {};
   form.questions.forEach((q) => {
     grouped[q.id] = [];
-    responses.forEach((r) => {
-      grouped[q.id].push(r.answers[q.id]);
-    });
+    responses.forEach((r) => grouped[q.id].push(r.answers[q.id]));
   });
 
-  // ---- GET MCQ/Checkbox counts ----
   const getCounts = (values) => {
     const map = {};
     values.forEach((v) => {
-      if (Array.isArray(v)) {
-        v.forEach((x) => (map[x] = (map[x] || 0) + 1));
-      } else {
-        map[v] = (map[v] || 0) + 1;
-      }
+      if (Array.isArray(v)) v.forEach((x) => (map[x] = (map[x] || 0) + 1));
+      else if (v) map[v] = (map[v] || 0) + 1;
     });
-    return Object.entries(map).map(([label, count]) => ({
-      label,
-      count
+    return Object.entries(map).map(([label, count], index) => ({ 
+      label, 
+      count,
+      fill: CHART_COLORS[index % CHART_COLORS.length] // Assign color dynamically
     }));
   };
 
+  const completionRate = Math.round(
+    (responses.filter((r) => Object.values(r.answers).every((x) => x !== "" && x !== undefined)).length / responses.length) * 100
+  );
+
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-3xl font-bold mb-2">{form.title}</h1>
-      <p className="text-gray-600 mb-6">{responses.length} responses</p>
+    <div className="p-6 md:p-10 max-w-7xl mx-auto bg-slate-50 min-h-screen">
+      <div className="mb-8">
+        <h1 className="text-4xl font-extrabold text-gray-900 mb-2">{form.title}</h1>
+        <p className="text-lg text-gray-500">Analytics & Aggregated Metrics</p>
+      </div>
 
-      {/* ---------- SUMMARY CARDS ---------- */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-white shadow p-4 rounded-xl">
-          <p className="text-sm text-gray-500">Questions</p>
-          <h2 className="text-2xl font-semibold">{form.questions.length}</h2>
+      {/* KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div className="bg-white border-l-4 border-indigo-600 shadow-sm p-6 rounded-xl">
+          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Total Datapoints</p>
+          <h2 className="text-4xl font-bold text-gray-900">{form.questions.length}</h2>
         </div>
-
-        <div className="bg-white shadow p-4 rounded-xl">
-          <p className="text-sm text-gray-500">Responses</p>
-          <h2 className="text-2xl font-semibold">{responses.length}</h2>
+        <div className="bg-white border-l-4 border-blue-500 shadow-sm p-6 rounded-xl">
+          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Total Submissions</p>
+          <h2 className="text-4xl font-bold text-gray-900">{responses.length}</h2>
         </div>
-
-        <div className="bg-white shadow p-4 rounded-xl">
-          <p className="text-sm text-gray-500">Completion Rate</p>
-          <h2 className="text-2xl font-semibold">
-            {Math.round(
-              (responses.filter((r) =>
-                Object.values(r.answers).every((x) => x !== "" && x !== undefined)
-              ).length /
-                responses.length) *
-                100
-            )}
-            %
-          </h2>
+        <div className="bg-white border-l-4 border-teal-500 shadow-sm p-6 rounded-xl">
+          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Completion Rate</p>
+          <h2 className="text-4xl font-bold text-gray-900">{completionRate}%</h2>
         </div>
       </div>
 
-      {/* ---------- QUESTION-WISE ANALYSIS ---------- */}
-      <div className="space-y-10">
+      {/* Visualizations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {form.questions.map((q, idx) => {
           const answers = grouped[q.id];
+          const hasChart = q.type === "radio" || q.type === "checkbox"; // Note: changed from "mcq" to match your builder logic
 
           return (
-            <div key={q.id} className="bg-white p-6 rounded-xl shadow">
-              <h2 className="text-xl font-semibold mb-3">
-                Q{idx + 1}. {q.question}
+            <div key={q.id} className={`bg-white p-6 rounded-2xl shadow-sm border border-gray-100 ${!hasChart ? 'col-span-1 lg:col-span-2' : ''}`}>
+              <h2 className="text-lg font-bold text-gray-800 mb-6 border-b border-gray-100 pb-4">
+                <span className="text-indigo-400 mr-2">Q{idx + 1}.</span> {q.question}
               </h2>
 
-              {/* SHORT / PARAGRAPH ANSWERS */}
-              {(q.type === "short" || q.type === "paragraph") && (
-                <div className="space-y-2">
+              {/* TEXT ANSWERS */}
+              {!hasChart && (
+                <div className="max-h-64 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                   {answers.map((a, i) => (
-                    <p
-                      key={i}
-                      className="bg-gray-100 p-2 rounded border text-gray-700"
-                    >
-                      {a || <i className="text-gray-400">No answer</i>}
-                    </p>
+                    <div key={i} className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-gray-700 text-sm">
+                      {a || <span className="text-gray-400 italic">Left blank</span>}
+                    </div>
                   ))}
                 </div>
               )}
 
-              {/* MCQ / CHECKBOX - BAR CHART */}
-              {(q.type === "mcq" || q.type === "checkbox") && (
-                <div className="h-64 mt-4">
+              {/* CHARTS */}
+              {hasChart && (
+                <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={getCounts(answers)}
-                      margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
-                    >
-                      <XAxis dataKey="label" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="count" fill="#6A5AE0" />
+                    <BarChart data={getCounts(answers)} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} allowDecimals={false} />
+                      <Tooltip 
+                        cursor={{fill: '#F3F4F6'}}
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                      />
+                      <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={60} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -139,38 +116,6 @@ const ResponseAnalytics = () => {
             </div>
           );
         })}
-      </div>
-
-      {/* ---------- DIAGNOSTIC REPORT ---------- */}
-      <div className="bg-white mt-10 p-6 rounded-xl shadow">
-        <h2 className="text-2xl font-bold mb-3">📊 Diagnostic Report</h2>
-
-        <p className="text-gray-700">
-          Based on all responses, here is an automated summary of insights:
-        </p>
-
-        <ul className="list-disc ml-6 mt-4 space-y-2 text-gray-700">
-          <li>
-            <b>Most selected MCQ option:</b>{" "}
-            {
-              form.questions
-                .filter((q) => q.type === "mcq")[0]
-                ?.options?.sort(
-                  (a, b) =>
-                    getCounts(grouped[
-                      form.questions.filter((q) => q.type === "mcq")[0].id
-                    ]).find((x) => x.label === b)?.count -
-                    getCounts(grouped[
-                      form.questions.filter((q) => q.type === "mcq")[0].id
-                    ]).find((x) => x.label === a)?.count
-                )[0]
-            }
-          </li>
-
-          <li>Your audience prefers simpler, faster workflows.</li>
-          <li>Most users gave detailed descriptive answers, indicating engagement.</li>
-          <li>Checkbox responses show strong pattern clustering.</li>
-        </ul>
       </div>
     </div>
   );
