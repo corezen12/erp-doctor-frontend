@@ -4,75 +4,71 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../utils/firebase";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
-// --- BOMB-PROOF AI PARSER ---
+// --- INDESTRUCTIBLE AI PARSER ---
 const parseAIReport = (rawText) => {
   if (!rawText) return null;
 
   try {
-    // Helper to safely extract text between two section headers
-    const getSection = (startKeyword, endKeyword) => {
-      const startIndex = rawText.indexOf(startKeyword);
-      if (startIndex === -1) return "";
-      
-      const contentStart = rawText.indexOf("\n", startIndex);
-      if (contentStart === -1) return "";
-
-      let endIndex = rawText.length;
-      if (endKeyword) {
-        const foundEnd = rawText.indexOf(endKeyword, contentStart);
-        if (foundEnd !== -1) endIndex = foundEnd;
-      }
-      return rawText.substring(contentStart, endIndex).trim();
+    // Safely extract text between "PART X" and "PART Y" regardless of symbols or dashes
+    const extract = (partNum) => {
+      const regex = new RegExp(`PART ${partNum}[^\\n]*\\n([\\s\\S]*?)(?=PART ${partNum + 1}|$)`, 'i');
+      const match = rawText.match(regex);
+      return match ? match[1].trim() : "";
     };
 
-    // Extract Sections
-    const summary = getSection("PART 1", "PART 2");
-    const scoreSection = getSection("PART 2", "PART 3");
-    const deptSection = getSection("PART 3", "PART 4");
-    const risksSection = getSection("PART 4", "PART 5");
-    const recsSection = getSection("PART 5", "PART 6");
-    const verdictSection = getSection("PART 6", "");
+    const summary = extract(1);
+    const scoreSection = extract(2);
+    const deptSection = extract(3);
+    const risksSection = extract(4);
+    const recsSection = extract(5);
+    const verdictSection = extract(6);
 
-    // Process Overall Score
+    // Extract Overall Score (Hunts for any number 1-5)
     const scoreMatch = scoreSection.match(/([1-5])/);
     const overallScore = scoreMatch ? parseInt(scoreMatch[1]) : 0;
-    const scoreExplanation = scoreSection.replace(/\*\*.*?\*\*/g, '').replace(/Score.*?[1-5].*?\n/i, '').trim();
+    
+    // Clean up the explanation text
+    const scoreExplanation = scoreSection
+      .replace(/\*\*Score.*?[1-5].*?\*\*/i, '') // Removes bolded scores
+      .replace(/\*\*Explanation.*?\*\*/i, '') // Removes bolded headers
+      .replace(/Score.*?[1-5]/i, '') // Fallback
+      .trim();
 
-    // Process Departments for the Chart
+    // Extract Departments for the Heatmap
     const departments = [];
     const deptLines = deptSection.split('\n');
     deptLines.forEach(line => {
-      // Looks for any line with a number 1-5 that also has letters (the department name)
-      const match = line.match(/[-*]*\s*([a-zA-Z\s&/]+)\s*[-*:]+\s*([1-5])/);
-      if (match && match[1].trim().length > 2) {
-        departments.push({ 
-          name: match[1].replace(/\*/g, '').replace(/:/g, '').trim(), 
-          score: parseInt(match[2]) 
-        });
+      // Looks for text (department name) followed by a score 1-5
+      const match = line.match(/[-*]*\s*([a-zA-Z\s&/]+).*?([1-5])/);
+      if (match) {
+         let name = match[1].replace(/[-*:]/g, '').trim();
+         if (name.length > 2 && !name.toLowerCase().includes("score")) {
+           departments.push({ name, score: parseInt(match[2]) });
+         }
       }
     });
 
-    // Process Lists
+    // Clean up bulleted lists
     const cleanList = (text) => text.split('\n')
-      .map(l => l.replace(/^[-*]+/, '').replace(/\*\*/g, '').trim())
-      .filter(l => l.length > 5);
+      .map(l => l.replace(/^[-*0-9.]+/, '').replace(/\*\*/g, '').trim())
+      .filter(l => l.length > 3);
 
     return {
-      summary: summary || "Summary could not be parsed.",
-      overallScore,
-      scoreExplanation: scoreExplanation || "Explanation unavailable.",
+      summary: summary || "Summary could not be extracted.",
+      overallScore: overallScore || 0,
+      scoreExplanation: scoreExplanation || "",
       departments,
       rawDepartments: deptSection,
       risks: cleanList(risksSection),
       recommendations: cleanList(recsSection),
-      verdict: verdictSection.replace(/\*/g, '').trim() || "Analyzed"
+      verdict: verdictSection.replace(/\*/g, '').replace(/Final Verdict:?/i, '').trim() || "Analyzed"
     };
+
   } catch (err) {
-    console.error("Failed to parse AI text:", err);
-    return null; // Fallback to raw text view if parsing completely crashes
+    console.error("AI Parse Error:", err);
+    return null;
   }
 };
-
 
 const ResponseDashboard = () => {
   const { formId, responseId } = useParams();
@@ -81,7 +77,7 @@ const ResponseDashboard = () => {
   
   const [rawInsights, setRawInsights] = useState(null);
   const [parsedData, setParsedData] = useState(null);
-  const [showRaw, setShowRaw] = useState(false); // Toggle to view raw text
+  const [showRaw, setShowRaw] = useState(false); 
   
   const [loadingAI, setLoadingAI] = useState(false);
   const [error, setError] = useState("");
@@ -103,6 +99,7 @@ const ResponseDashboard = () => {
   const analyzeWithAI = async () => {
     setLoadingAI(true);
     setError("");
+    setShowRaw(false); // Reset view on new analysis
 
     try {
       const API_URL = import.meta.env.VITE_BACKEND_URL || "https://erp-doctor-backend.onrender.com/analyze"; 
@@ -119,10 +116,7 @@ const ResponseDashboard = () => {
         setError(data.error);
       } else {
         setRawInsights(data.analysis);
-        const parsed = parseAIReport(data.analysis);
-        setParsedData(parsed);
-        // If parser fails to find a score, default to raw view
-        if (!parsed || parsed.overallScore === 0) setShowRaw(true);
+        setParsedData(parseAIReport(data.analysis));
       }
     } catch (err) {
       setError("Failed to connect to the AI Diagnostic Engine.");
@@ -216,7 +210,7 @@ const ResponseDashboard = () => {
             )}
 
             {/* SUCCESS STATE - DASHBOARD UI */}
-            {rawInsights && (
+            {rawInsights && parsedData && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 md:p-8">
                 
                 {/* Header & Toggle */}
@@ -237,7 +231,7 @@ const ResponseDashboard = () => {
                 </div>
 
                 {/* RAW FALLBACK VIEW */}
-                {(showRaw || !parsedData) ? (
+                {showRaw ? (
                    <div className="prose prose-indigo max-w-none bg-slate-50 p-6 rounded-xl border border-slate-200 overflow-y-auto max-h-[600px]">
                      <pre className="whitespace-pre-wrap text-gray-800 font-sans leading-relaxed text-sm">
                        {rawInsights}
@@ -283,7 +277,7 @@ const ResponseDashboard = () => {
                     </div>
 
                     {/* Middle Row: Department Chart */}
-                    {parsedData.departments.length > 0 ? (
+                    {parsedData.departments.length > 0 && (
                       <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">Departmental Heatmap</h3>
                         <div className="h-64 w-full">
@@ -303,7 +297,7 @@ const ResponseDashboard = () => {
                           </ResponsiveContainer>
                         </div>
                       </div>
-                    ) : null}
+                    )}
 
                     {/* Bottom Row: Risks & Recommendations */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
